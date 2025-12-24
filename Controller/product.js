@@ -12,30 +12,39 @@ const getAllProducts = async (req, res) => {
 
     let products, total, totalPages, currentPage;
 
-    if ((!page && offset === undefined) || !perPage) {
-      // No pagination params => return all
-      products = await Product.find({});
-      total = products.length;
-      totalPages = 1;
-      currentPage = 1;
-    } else {
-      total = await Product.countDocuments({});
+    const category = req.query.category;
+    const status = req.query.status;
+    const search = req.query.search;
 
-      let skipValue = 0;
-      if (offset !== undefined && !isNaN(offset)) {
-        skipValue = offset;
-        currentPage = Math.floor(offset / perPage) + 1;
-      } else if (page) {
-        skipValue = (page - 1) * perPage;
-        currentPage = page;
-      }
+    let query = {};
 
-      products = await Product.find({})
-        .skip(skipValue)
-        .limit(perPage);
-
-      totalPages = Math.ceil(total / perPage);
+    if (category && category !== 'all') {
+      query.category = category;
     }
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    if (search) {
+      query.name = { $regex: search, $options: 'i' };
+    }
+
+    total = await Product.countDocuments(query);
+
+    let skipValue = 0;
+    if (offset !== undefined && !isNaN(offset)) {
+      skipValue = offset;
+      currentPage = Math.floor(offset / perPage) + 1;
+    } else if (page) {
+      skipValue = (page - 1) * perPage;
+      currentPage = page;
+    }
+
+    products = await Product.find(query)
+      .sort({ updatedAt: -1 })
+      .skip(skipValue)
+      .limit(perPage);
+
+    totalPages = Math.ceil(total / perPage);
 
     const formatted = products.map(product => ({
       ...product.toObject(),

@@ -7,6 +7,10 @@ const router = express.Router();
 // Apply authMiddleware to protect all vendor routes
 // Assuming only admin or authorized users should access these
 router.post("/create", authMiddleware, vendorController.createVendor);
+router.get("/dashboard", authMiddleware, vendorController.getVendorDashboard);
+router.get("/order/:id", authMiddleware, vendorController.getVendorOrderDetails);
+router.patch("/order/status", authMiddleware, vendorController.updateOrderStatus);
+router.patch("/status", authMiddleware, vendorController.toggleVendorStatus);
 router.get("/getAll", authMiddleware, vendorController.getAllVendors);
 router.get("/get/:id", authMiddleware, vendorController.getVendorById);
 router.patch("/update/:id", authMiddleware, vendorController.updateVendor);

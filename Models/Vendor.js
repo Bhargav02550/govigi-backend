@@ -6,7 +6,7 @@ const VendorSchema = new mongoose.Schema({
   contactPerson: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   phone: { type: String, required: true },
-  
+
   // Rich Address Structure (Embedded)
   address: {
     formattedAddress: { type: String, required: true },
@@ -41,11 +41,23 @@ const VendorSchema = new mongoose.Schema({
     ifscCode: String
   },
 
+  // Service Range (H3 Hexagons)
+  serviceHexagons: {
+    type: [String],
+    default: []
+  },
+
+  // Smart Sourcing: Product Categories
+  supportedCategories: {
+    type: [String],
+    default: []
+  },
+
   // Status & Metadata
   isActive: { type: Boolean, default: true },
   isVerified: { type: Boolean, default: false },
   rating: { type: Number, default: 0 },
-  
+
   joinedDate: { type: Date, default: Date.now }
 }, { timestamps: true });
 

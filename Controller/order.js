@@ -208,11 +208,30 @@ const getAllOrders = async (req, res) => {
     const orders = await Order.find()
       .populate('customerId', 'customerName customerPhone customerContactPerson customerAddress customerType')
       .populate('addressId')
+      .lean() // Use lean for modifying the result
       .sort({ createdAt: -1 });
 
     if (!orders || orders.length === 0) {
       return res.status(404).json({ message: "No orders found" });
     }
+
+    // Populate Categories for Sourcing UI
+    // Fetch all products with just their category
+    const products = await Product.find({}, 'category').lean();
+    const productMap = {};
+    products.forEach(p => {
+      productMap[p._id.toString()] = p.category;
+    });
+
+    // Attach category to each item
+    orders.forEach(order => {
+      if (order.items) {
+        order.items.forEach(item => {
+          const cat = productMap[item.productId];
+          item.category = cat || "General";
+        });
+      }
+    });
 
     res.status(200).json(orders);
   } catch (err) {
@@ -325,4 +344,47 @@ const updatePaymentStatus = async (req, res) => {
   }
 };
 
-export { placeCustomerOrder, getCustomerOrders, updateOrderStatus, getAllOrders, getOrderById, getCustomerOrderCount, updatePaymentStatus };
+const cancelCustomerOrder = async (req, res) => {
+  try {
+    const { token } = req.token;
+    if (!token) {
+      return res.status(400).json({ message: "Token is required" });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (tokenErr) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+
+    const customerId = decoded.customerId;
+    const { id } = req.params;
+
+    const order = await Order.findById(id);
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Ensure the order belongs to the requesting customer
+    if (order.customerId.toString() !== customerId) {
+      return res.status(403).json({ message: "Unauthorized to cancel this order" });
+    }
+
+    if (order.status !== "Pending") {
+      return res.status(400).json({ message: "Only pending orders can be cancelled" });
+    }
+
+    order.status = "Cancelled";
+    await order.save();
+
+    res.status(200).json({ message: "Order cancelled successfully", order });
+
+  } catch (err) {
+    console.error("Cancel Order Error:", err);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export { placeCustomerOrder, getCustomerOrders, updateOrderStatus, getAllOrders, getOrderById, getCustomerOrderCount, updatePaymentStatus, cancelCustomerOrder };

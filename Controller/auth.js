@@ -1,4 +1,5 @@
 import Customer from "../Models/Customer.js";
+import Vendor from "../Models/Vendor.js";
 import jwt from "jsonwebtoken";
 import sendOtp from "./utils/sendOTP.js";
 import Otp from "../Models/OtpSchema.js";
@@ -243,6 +244,119 @@ export {
   send_otp,
   verify_otp,
   completeProfile,
+  send_vendor_otp,
+  verify_vendor_otp,
+};
+
+// --- Vendor Auth ---
+const send_vendor_otp = async (req, res) => {
+  try {
+    const { contact } = req.body;
+
+    if (!contact) {
+      return res.status(400).json({ message: "Contact required" });
+    }
+
+    const isTestNumber = contact === '9999999999' || contact === '9133485888';
+
+    // Check if vendor exists
+    let vendor = await Vendor.findOne({ phone: contact });
+
+    if (!vendor) {
+      if (isTestNumber) {
+        // Auto-create test vendor if not exists
+        vendor = await Vendor.create({
+          businessName: "Test Vendor",
+          contactPerson: "Tester",
+          email: `test_${contact}@govigi.com`,
+          phone: contact,
+          address: {
+            formattedAddress: "Test Address, India",
+            components: { city: "Test City", country: "India" }
+          },
+          isActive: true
+        });
+        console.log("Created test vendor for:", contact);
+      } else {
+        return res.status(404).json({ message: "Vendor not found. Please contact admin." });
+      }
+    }
+
+    const otp = isTestNumber ? '1234' : generateOTP();
+    const hashed = hashOTP(otp);
+
+    await Otp.deleteMany({ mobileNumber: contact });
+
+    await Otp.create({
+      mobileNumber: contact,
+      otp: hashed,
+      role: 'vendor' // Optional: if you want to distinguish in OTP table
+    });
+
+    if (!isTestNumber) {
+      await sendOtp(contact, otp);
+    }
+    console.log("Vendor OTP:", otp);
+
+    res.json({
+      message: "OTP sent successfully",
+      isVendor: true
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to send OTP" });
+  }
+};
+
+const verify_vendor_otp = async (req, res) => {
+  try {
+    const { contact, otp } = req.body;
+
+    if (!contact || !otp) {
+      return res.status(400).json({ message: "Contact and OTP required" });
+    }
+
+    const hashed = hashOTP(otp);
+
+    const otpRecord = await Otp.findOne({ mobileNumber: contact });
+
+    if (!otpRecord) {
+      return res.status(400).json({ message: "OTP expired or not found" });
+    }
+
+    if (otpRecord.otp !== hashed) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+    await Otp.deleteMany({ mobileNumber: contact });
+
+    const vendor = await Vendor.findOne({ phone: contact });
+
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor record not found" });
+    }
+
+    const token = jwt.sign(
+      {
+        vendorId: vendor._id,
+        contact: vendor.phone,
+        role: "vendor",
+        businessName: vendor.businessName
+      },
+      JWT_SECRET,
+      { expiresIn: "14d" }
+    );
+
+    return res.json({
+      message: "OTP verified",
+      token,
+      vendor
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to verify OTP" });
+  }
 };
 
 // --- Admin Login ---

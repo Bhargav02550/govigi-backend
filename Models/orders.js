@@ -16,7 +16,11 @@ const orderSchema = new mongoose.Schema(
         quantityKg: { type: Number, required: true },
         price: { type: Number, required: true },
         name: { type: String, required: true },
-        image: { type: String, required: true }
+        image: { type: String, required: true },
+        // Split Sourcing Fields
+        category: { type: String }, // Persist category 
+        vendorId: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },
+        sourcingStatus: { type: String, default: "Pending" } // Pending, Assigned
       },
     ],
     addressId: {

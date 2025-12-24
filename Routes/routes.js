@@ -36,6 +36,8 @@ Router.post("/admin/login", controller_auth.adminLogin);
 Router.post("/sendOTP", controller_auth.send_otp);
 Router.post("/verifyOTP", controller_auth.verify_otp);
 Router.post("/completeProfile", controller_auth.completeProfile);
+Router.post("/sendVendorOTP", controller_auth.send_vendor_otp);
+Router.post("/verifyVendorOTP", controller_auth.verify_vendor_otp);
 
 //Customer
 Router.post("/createCustomer", controller_customer.createCustomerController);
@@ -63,6 +65,7 @@ Router.post("/createTemplate", controller_template.createTemplate);
 //order
 Router.post("/customerOrders", authMiddleware, controller_order.getCustomerOrders);
 Router.post("/getCustomerOrderCount", authMiddleware, controller_order.getCustomerOrderCount);
+Router.patch("/cancelOrder/:id", authMiddleware, controller_order.cancelCustomerOrder);
 Router.post("/placeCustomerOrder", authMiddleware, controller_order.placeCustomerOrder);
 Router.patch("/updateStatus/:id", authMiddleware, controller_order.updateOrderStatus);
 Router.patch("/updatePaymentStatus/:id", authMiddleware, controller_order.updatePaymentStatus);
