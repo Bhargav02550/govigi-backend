@@ -65,11 +65,8 @@ const getAllCustomersCountController = async (req, res) => {
 
 const getCustomerProfileController = async (req, res) => {
     try {
-        const { token } = req.token;
-        if (!token) return res.status(401).json({ message: "No token provided" });
-
-        const decoded = jwt.verify(token, process.env.SCERET_KEY);
-        const customer = await customerService.getCustomerById(decoded.customerId);
+        if (!req.user || !req.user.customerId) return res.status(401).json({ message: "No token provided" });
+        const customer = await customerService.getCustomerById(req.user.customerId);
 
         if (!customer) {
             return res.status(404).json({ message: "Customer not found" });

@@ -8,6 +8,7 @@ import {
 } from "../Controller/AdminCustomerController.js";
 import { assignDriverToOrder, createDriver, getAllDrivers, updateOrderStatus, updatePaymentStatus } from "../Controller/AdminOrderController.js";
 import { updateSetting, getSetting } from "../Controller/AdminSettingsController.js";
+import { getWalletSettings, updateWalletSettings } from "../Controller/settings.js";
 
 const router = express.Router();
 
@@ -35,6 +36,8 @@ import { getAllTransactions } from "../Controller/AdminFinanceController.js";
 router.get("/finance/transactions", getAllTransactions);
 
 // --- Global Settings (Delivery Zones, Wallet %) ---
+router.get("/settings/wallet", getWalletSettings);
+router.put("/settings/wallet", updateWalletSettings);
 router.get("/settings/:key", getSetting);
 router.put("/settings", updateSetting);
 

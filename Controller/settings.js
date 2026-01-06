@@ -70,4 +70,40 @@ const getMobileConfig = async (req, res) => {
     }
 };
 
-export { getSchedulingSettings, updateSchedulingSettings, getMobileConfig };
+const getWalletSettings = async (req, res) => {
+    try {
+        let settings = await GlobalSettings.findOne({ key: "wallet_percentage" });
+        if (!settings) {
+            settings = await GlobalSettings.create({
+                key: "wallet_percentage",
+                value: 10 // Default 10%
+            });
+        }
+        res.status(200).json({ percentage: settings.value });
+    } catch (err) {
+        console.error("Get Wallet Settings Error:", err);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+const updateWalletSettings = async (req, res) => {
+    try {
+        const { percentage } = req.body;
+        if (percentage < 0 || percentage > 100) {
+            return res.status(400).json({ message: "Percentage must be between 0 and 100" });
+        }
+
+        const settings = await GlobalSettings.findOneAndUpdate(
+            { key: "wallet_percentage" },
+            { value: percentage },
+            { new: true, upsert: true }
+        );
+
+        res.status(200).json({ message: "Wallet settings updated", percentage: settings.value });
+    } catch (err) {
+        console.error("Update Wallet Settings Error:", err);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export { getSchedulingSettings, updateSchedulingSettings, getMobileConfig, getWalletSettings, updateWalletSettings };

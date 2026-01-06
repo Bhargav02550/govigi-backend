@@ -141,6 +141,65 @@ const getProductsStats = async (req, res) => {
   }
 }
 
+const getCustomerProducts = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const category = req.query.category;
+    const search = req.query.search;
+
+    // Relaxed filter: Show everything that is NOT strictly 'inactive'
+    // This handles legacy data where status might be missing
+    const query = { status: { $ne: 'inactive' } };
+
+    if (category && category !== 'all') {
+      query.category = { $regex: category, $options: 'i' }; // Flexible matching
+    }
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const total = await Product.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+    const skip = (page - 1) * limit;
+
+    const products = await Product.find(query)
+      .sort({ updatedAt: -1 }) // or sortBy popularity/name
+      .skip(skip)
+      .limit(limit)
+      .lean(); // Faster
+
+    const formatted = products.map(product => ({
+      _id: product._id,
+      name: product.name,
+      category: product.category,
+      price: product.pricePerKg, // Normalized field name for frontend
+      pricePerKg: product.pricePerKg,
+      image: { url: product.image?.url || null }, // Match frontend expected structure
+      stock: product.stock,
+      availableStock: product.availableStock,
+      // Exclude internal fields like costPrice, vendorId etc if any
+    }));
+
+    res.status(200).json({
+      products: formatted,
+      page,
+      limit,
+      total,
+      totalPages,
+      hasMore: page < totalPages
+    });
+
+  } catch (err) {
+    console.error("Get Customer Products Error:", err);
+    res.status(500).json({ message: 'Failed to fetch products', error: err.message });
+  }
+};
+
 const bulkUpdateProducts = async (req, res) => {
   try {
     const { productIds, updates } = req.body;
@@ -188,5 +247,6 @@ export {
   updateProduct,
   deleteProduct,
   getProductsStats,
-  bulkUpdateProducts
+  bulkUpdateProducts,
+  getCustomerProducts
 };

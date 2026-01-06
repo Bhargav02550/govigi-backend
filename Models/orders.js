@@ -12,7 +12,7 @@ const orderSchema = new mongoose.Schema(
     assignedAt: { type: Date },
     items: [
       {
-        productId: { type: String, required: true },
+        productId: { type: mongoose.Schema.Types.ObjectId, ref: 'product', required: true },
         quantityKg: { type: Number, required: true },
         price: { type: Number, required: true },
         name: { type: String, required: true },
@@ -38,6 +38,7 @@ const orderSchema = new mongoose.Schema(
     sourcingStatus: { type: String, default: "Pending" }, // Pending, Assigned, Shipped, Delivered, etc.
     scheduledDate: { type: Date },
     scheduledTimeSlot: { type: String },
+    walletAmountUsed: { type: Number, default: 0 },
   },
   {
     timestamps: true,

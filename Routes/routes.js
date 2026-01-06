@@ -79,6 +79,7 @@ Router.post(
   controller_product.createProduct
 );
 Router.get("/getAllProducts", controller_product.getAllProducts);
+Router.get("/getCustomerProducts", controller_product.getCustomerProducts);
 Router.get("/getProductsStats", controller_product.getProductsStats);
 Router.patch(
   "/updateProduct/:id",
@@ -129,6 +130,7 @@ Router.get("/maps/place-details", controller_maps.placeDetails);
 Router.get("/settings/scheduling", controller_settings.getSchedulingSettings);
 Router.patch("/settings/scheduling", controller_settings.updateSchedulingSettings);
 Router.get("/mobile/config", controller_settings.getMobileConfig);
+Router.get("/settings/wallet", controller_settings.getWalletSettings);
 
 // Sourcing
 Router.get("/sourcing/vendors", controller_sourcing.getNearbyVendors);
@@ -136,5 +138,10 @@ Router.post("/sourcing/assign", controller_sourcing.assignOrdersToVendor);
 
 // Vendor Routes
 Router.use("/vendors", vendorRoutes);
+
+// Product Requests
+import * as controller_productRequest from "../Controller/ProductRequestController.js";
+Router.post("/createProductRequest", authMiddleware, controller_productRequest.createProductRequest);
+Router.get("/getAllProductRequests", authMiddleware, controller_productRequest.getProductRequests);
 
 export default Router;

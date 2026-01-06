@@ -5,35 +5,13 @@ const JWT_SECRET = process.env.SCERET_KEY;
 
 const addAddress = async (req, res) => {
     try {
-        const { token } = req.token;
-        console.log("Token from Middleware:", token);
-
-        if (!token) {
-            return res.status(400).json({
-                success: false,
-                message: "Token is required"
-            });
-        }
-
-        let decoded;
-        try {
-            decoded = jwt.verify(token, JWT_SECRET);
-        }
-        catch (tokenErr) {
-            console.log("Token verification error:", tokenErr);
-            return res.status(401).json({
-                success: false,
-                message: "Invalid or expired token",
-                error: tokenErr.message
-            });
-        }
-
-        console.log("Decoded UserId :", decoded.customerId);
+        const customerId = req.user.customerId;
+        console.log("Decoded UserId :", customerId);
         console.log("Request Body :", req.body);
 
         const address = await Address.create({
 
-            customerId: decoded.customerId,
+            customerId: customerId,
             placeId: req.body.placeId,
             formattedAddress: req.body.formattedAddress,
             rawAddress: req.body.rawAddress,
@@ -46,7 +24,7 @@ const addAddress = async (req, res) => {
         // If marked as primary, make sure others are not primary
         if (address.isPrimary) {
             await Address.updateMany(
-                { customerId: decoded.customerId, _id: { $ne: address._id } },
+                { customerId: customerId, _id: { $ne: address._id } },
                 { $set: { isPrimary: false } }
             );
         }
@@ -66,33 +44,12 @@ const addAddress = async (req, res) => {
 
 const getAddresses = async (req, res) => {
     try {
-        const { token } = req.token;
-        console.log("Token from Middleware:", token);
-
-        if (!token) {
-            return res.status(400).json({
-                success: false,
-                message: "Token is required"
-            });
-        }
-
-        let decoded;
-        try {
-            decoded = jwt.verify(token, JWT_SECRET);
-        }
-        catch (tokenErr) {
-            console.log("Token verification error:", tokenErr);
-            return res.status(401).json({
-                success: false,
-                message: "Invalid or expired token",
-                error: tokenErr.message
-            });
-        }
+        const customerId = req.user.customerId;
 
         let addresses;
 
         try {
-            addresses = await Address.find({ customerId: decoded.customerId });
+            addresses = await Address.find({ customerId: customerId });
             console.log("Addresses found:", addresses.length);
         }
         catch (findErr) {

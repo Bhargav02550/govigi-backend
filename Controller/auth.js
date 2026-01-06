@@ -7,9 +7,9 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import TempCustomer from "../Models/TempCustomer.js";
 import Address from "../Models/Address.js";
+import Admin from "../Models/admins.js";
 dotenv.config();
 
-const JWT_SECRET = process.env.SCERET_KEY;
 
 function generateOTP() {
   return crypto.randomInt(1000, 9999).toString();
@@ -98,7 +98,7 @@ const verify_otp = async (req, res) => {
           role: "customer",
           customerStatus: customer.customerStatus
         },
-        JWT_SECRET,
+        process.env.SCERET_KEY,
         { expiresIn: "14d" }
       );
 
@@ -123,7 +123,7 @@ const verify_otp = async (req, res) => {
         contact: tempCustomer.mobileNumber,
         role: "tempCustomer"
       },
-      JWT_SECRET,
+      process.env.SCERET_KEY,
       { expiresIn: "14d" }
     );
 
@@ -167,7 +167,7 @@ const completeProfile = async (req, res) => {
       return res.status(400).json({ message: "All fields are required." });
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.SCERET_KEY);
 
     console.log(decoded);
 
@@ -213,7 +213,7 @@ const completeProfile = async (req, res) => {
         role: "customer",
         customerStatus: newCustomer.customerStatus
       },
-      JWT_SECRET,
+      process.env.SCERET_KEY,
       { expiresIn: "14d" }
     );
 
@@ -240,13 +240,7 @@ const completeProfile = async (req, res) => {
   }
 };
 
-export {
-  send_otp,
-  verify_otp,
-  completeProfile,
-  send_vendor_otp,
-  verify_vendor_otp,
-};
+
 
 // --- Vendor Auth ---
 const send_vendor_otp = async (req, res) => {
@@ -343,7 +337,7 @@ const verify_vendor_otp = async (req, res) => {
         role: "vendor",
         businessName: vendor.businessName
       },
-      JWT_SECRET,
+      process.env.SCERET_KEY,
       { expiresIn: "14d" }
     );
 
@@ -360,7 +354,6 @@ const verify_vendor_otp = async (req, res) => {
 };
 
 // --- Admin Login ---
-import Admin from "../Models/admins.js";
 
 const adminLogin = async (req, res) => {
   try {
@@ -384,7 +377,7 @@ const adminLogin = async (req, res) => {
     // Optionally, generate a JWT for admin session
     const token = jwt.sign(
       { adminId: admin._id, email: admin.email },
-      JWT_SECRET,
+      process.env.SCERET_KEY,
       { expiresIn: "14d" }
     );
     res.status(200).json({ message: "Login successful", token });
@@ -393,4 +386,11 @@ const adminLogin = async (req, res) => {
   }
 };
 
-export { adminLogin };
+export {
+  send_otp,
+  verify_otp,
+  completeProfile,
+  send_vendor_otp,
+  verify_vendor_otp,
+  adminLogin
+};

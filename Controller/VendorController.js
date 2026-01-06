@@ -89,11 +89,9 @@ export const deleteVendor = async (req, res) => {
 // Vendor Dashboard
 export const getVendorDashboard = async (req, res) => {
     try {
-        const { token } = req.token;
-        if (!token) return res.status(401).json({ message: "No token provided" });
-
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const vendorId = decoded.vendorId;
+        // Middleware already verified token
+        const vendorId = req.user.vendorId;
+        if (!vendorId) return res.status(401).json({ message: "Invalid Vendor Token" });
 
         const vendor = await Vendor.findById(vendorId);
         if (!vendor) return res.status(404).json({ message: "Vendor not found" });
@@ -104,8 +102,8 @@ export const getVendorDashboard = async (req, res) => {
         // Calculate Stats
         const stats = {
             totalOrders: orders.length,
-            pending: orders.filter(o => o.sourcingStatus === 'Assigned' || o.sourcingStatus === 'Pending').length,
-            completed: orders.filter(o => o.sourcingStatus === 'Delivered').length,
+            pendingOrders: orders.filter(o => o.sourcingStatus === 'Assigned' || o.sourcingStatus === 'Pending').length,
+            completedOrders: orders.filter(o => o.sourcingStatus === 'Delivered').length,
             revenue: orders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0) // Approximation
         };
 
@@ -114,12 +112,16 @@ export const getVendorDashboard = async (req, res) => {
         orders.filter(o => o.sourcingStatus === 'Assigned' || o.sourcingStatus === 'Pending').forEach(order => {
             if (order.items && Array.isArray(order.items)) {
                 order.items.forEach(item => {
-                    if (materialSummary[item.name]) {
-                        materialSummary[item.name].qty += (item.quantityKg || 0);
+                    const itemName = item.name || "Unknown Item"; // Safety check
+                    if (materialSummary[itemName]) {
+                        materialSummary[itemName].qty += (item.quantityKg || 0);
                     } else {
-                        materialSummary[item.name] = {
+                        materialSummary[itemName] = {
                             qty: (item.quantityKg || 0),
-                            image: item.image
+                            image: item.image,
+                            unit: "kg",
+                            status: "Open", // Mock status for list
+                            createdAt: order.createdAt
                         };
                     }
                 });
@@ -128,10 +130,22 @@ export const getVendorDashboard = async (req, res) => {
 
         // Convert object to array for frontend
         const sourcingList = Object.keys(materialSummary).map(key => ({
-            name: key,
+            materialName: key,
             totalQuantity: materialSummary[key].qty,
-            image: materialSummary[key].image
+            unit: materialSummary[key].unit,
+            image: materialSummary[key].image,
+            status: materialSummary[key].status,
+            createdAt: materialSummary[key].createdAt
         }));
+
+        // Ensure orderId exists for frontend
+        const safeOrders = orders.map(o => {
+            const doc = o.toObject ? o.toObject() : o;
+            return {
+                ...doc,
+                orderId: doc.orderId || doc.orderNumber || doc._id.toString()
+            };
+        });
 
         res.json({
             profile: {
@@ -141,7 +155,7 @@ export const getVendorDashboard = async (req, res) => {
             },
             stats,
             sourcingList,
-            orders
+            recentOrders: safeOrders
         });
 
     } catch (error) {
@@ -180,10 +194,11 @@ export const getVendorOrderDetails = async (req, res) => {
 
 export const toggleVendorStatus = async (req, res) => {
     try {
-        const { token } = req.token;
-        const decoded = jwt.verify(token, JWT_SECRET);
+        // Middleware already verified token
+        const vendorId = req.user.vendorId;
+        if (!vendorId) return res.status(401).json({ message: "Invalid Vendor Token" });
 
-        const vendor = await Vendor.findById(decoded.vendorId);
+        const vendor = await Vendor.findById(vendorId);
         if (!vendor) return res.status(404).json({ message: "Vendor not found" });
 
         vendor.isActive = !vendor.isActive;
@@ -192,5 +207,27 @@ export const toggleVendorStatus = async (req, res) => {
         res.json({ message: "Status updated", isActive: vendor.isActive });
     } catch (error) {
         res.status(500).json({ message: "Error updating status" });
+    }
+};
+
+export const getVendorOrders = async (req, res) => {
+    try {
+        const vendorId = req.user.vendorId;
+        if (!vendorId) return res.status(401).json({ message: "Invalid Vendor Token" });
+
+        const orders = await Order.find({ vendorId: vendorId }).sort({ createdAt: -1 });
+
+        const safeOrders = orders.map(o => {
+            const doc = o.toObject ? o.toObject() : o;
+            return {
+                ...doc,
+                orderId: doc.orderId || doc.orderNumber || doc._id.toString()
+            };
+        });
+
+        res.json({ orders: safeOrders });
+    } catch (error) {
+        console.error("Fetch Orders Error:", error);
+        res.status(500).json({ message: "Error fetching orders", error: error.message });
     }
 };

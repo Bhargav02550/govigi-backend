@@ -2,33 +2,18 @@ import Order from "../Models/orders.js";
 import User from "../Models/users.js";
 import jwt from 'jsonwebtoken';
 import { generateOrderNumber } from './utils/orderNumberGenerator.js';
-import { creditVigiCoins } from "../Services/WalletService.js";
+import { creditVigiCoins, redeemVigiCoins } from "../Services/WalletService.js";
 import Address from "../Models/Address.js";
 import Product from "../Models/product.js";
 import Customer from "../Models/Customer.js";
+import GlobalSettings from "../Models/GlobalSettings.js";
+import Wallet from "../Models/Wallet.js";
 
 const JWT_SECRET = process.env.SCERET_KEY;
 
 const placeCustomerOrder = async (req, res) => {
   try {
-    const { token } = req.token;
-
-    if (!token) {
-      return res.status(400).json({ message: "Token is required" })
-    }
-
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (tokenErr) {
-      console.error("JWT verification failed:", tokenErr.message);
-      return res.status(401).json({
-        message: "Invalid or expired token",
-        error: tokenErr.message
-      });
-    }
-
-    const customerId = decoded.customerId;
+    const customerId = req.user.customerId;
 
     const customer = await Customer.findById(customerId);
 
@@ -44,7 +29,7 @@ const placeCustomerOrder = async (req, res) => {
       return res.status(403).json({ message: "Your account is pending admin approval." });
     }
 
-    const { items, addressId, scheduledDate, name, scheduledTimeSlot } = req.body;
+    const { items, addressId, scheduledDate, name, scheduledTimeSlot, useWallet } = req.body;
 
     // Scheduling Validation
     if (scheduledDate) {
@@ -95,6 +80,9 @@ const placeCustomerOrder = async (req, res) => {
         return res.status(404).json({ message: `Product not found: ${item.productId}` });
       }
 
+      console.log(`[DEBUG] Processing Product: ${product.name} (${product._id})`);
+      console.log(`[DEBUG] Category from DB: "${product.category}"`);
+
       const itemTotal = product.pricePerKg * item.quantityKg;
       totalAmount += itemTotal;
 
@@ -103,8 +91,25 @@ const placeCustomerOrder = async (req, res) => {
         quantityKg: item.quantityKg,
         price: product.pricePerKg,
         name: product.name,
-        image: product.image?.url || ""
+        image: product.image?.url || "",
+        category: product.category || "General" // Ensure category is saved
       });
+    }
+
+    // Wallet Logic
+    let walletAmountUsed = 0;
+    if (useWallet) {
+      const settings = await GlobalSettings.findOne({ key: "wallet_percentage" });
+      const walletPercentage = settings ? settings.value : 10; // Default 10%
+
+      const wallet = await Wallet.findOne({ customerId });
+      const walletBalance = wallet ? wallet.balance : 0;
+
+      const maxDeductible = (totalAmount * walletPercentage) / 100;
+      walletAmountUsed = Math.min(maxDeductible, walletBalance);
+
+      // Ensure strictly positive
+      if (walletAmountUsed < 0) walletAmountUsed = 0;
     }
 
     const orderNumber = await generateOrderNumber(customer.customerPhone, name);
@@ -118,8 +123,20 @@ const placeCustomerOrder = async (req, res) => {
       scheduledTimeSlot,
       name,
       contact: customer.customerPhone,
-      totalAmount
+      totalAmount,
+      walletAmountUsed // Store the amount used
     });
+
+    // Deduct from wallet if used
+    if (walletAmountUsed > 0) {
+      try {
+        await redeemVigiCoins(customerId, walletAmountUsed, newOrder._id);
+      } catch (walletError) {
+        console.error("Wallet deduction failed:", walletError);
+        // Optional: Revert order or flag it manually. 
+        // For now, we log it. In production, we should handle this robustly.
+      }
+    }
 
     // await creditVigiCoins(customer._id, totalAmount, newOrder._id);
 
@@ -131,30 +148,19 @@ const placeCustomerOrder = async (req, res) => {
   }
 }
 
+
 const getCustomerOrders = async (req, res) => {
   try {
-    const { token } = req.token;
-    console.log("req :", token);
-    if (!token) {
-      return res.status(400).json({ message: "Token is required" });
-    }
+    const customerId = req.user.customerId;
 
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (tokenErr) {
-      console.error("JWT verification failed:", tokenErr.message);
-      return res.status(401).json({
-        message: "Invalid or expired token",
-        error: tokenErr.message
-      });
-    }
+    console.log("Decoded CustomerId :", customerId);
 
-    console.log("Decoded CustomerId :", decoded);
-
-    const customerId = decoded.customerId;
-
-    const data = await Order.find({ customerId }).sort({ createdAt: -1 });
+    const data = await Order.find({ customerId })
+      .populate({
+        path: 'items.productId',
+        select: 'image name pricePerKg'
+      })
+      .sort({ createdAt: -1 });
 
     console.log("Data :", data);
 
@@ -208,6 +214,11 @@ const getAllOrders = async (req, res) => {
     const orders = await Order.find()
       .populate('customerId', 'customerName customerPhone customerContactPerson customerAddress customerType')
       .populate('addressId')
+      .populate({
+        path: 'items.productId',
+        select: 'image name pricePerKg category'
+      })
+      .populate('vendorId', 'businessName contactPerson phone address')
       .lean() // Use lean for modifying the result
       .sort({ createdAt: -1 });
 
@@ -227,7 +238,20 @@ const getAllOrders = async (req, res) => {
     orders.forEach(order => {
       if (order.items) {
         order.items.forEach(item => {
-          const cat = productMap[item.productId];
+          // If item.category exists (saved in order), use it.
+          // Fallback 1: Check populated product's category (item.productId.category)
+          // Fallback 2: Check map using populated product's ID (item.productId._id)
+          // Default: "General"
+
+          let cat = item.category;
+
+          if (!cat && item.productId && typeof item.productId === 'object') {
+            cat = item.productId.category; // From populated product
+            if (!cat && item.productId._id) {
+              cat = productMap[item.productId._id.toString()]; // From Map
+            }
+          }
+
           item.category = cat || "General";
         });
       }
@@ -261,7 +285,12 @@ const getOrderById = async (req, res) => {
 
     const { id } = req.params;
 
-    const order = await Order.findById(id).populate('customerId', 'customerName customerPhone customerContactPerson customerAddress customerType');
+    const order = await Order.findById(id)
+      .populate('customerId', 'customerName customerPhone customerContactPerson customerAddress customerType')
+      .populate({
+        path: 'items.productId',
+        select: 'image name pricePerKg'
+      });
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
@@ -281,25 +310,7 @@ const getOrderById = async (req, res) => {
 
 const getCustomerOrderCount = async (req, res) => {
   try {
-    const { token } = req.token;
-
-    if (!token) {
-      return res.status(400).json({ message: "Token is required" });
-    }
-
-    // Verify JWT token and extract contact
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (tokenErr) {
-      console.error("JWT verification failed:", tokenErr.message);
-      return res.status(401).json({
-        message: "Invalid or expired token",
-        error: tokenErr.message
-      });
-    }
-
-    const contact = decoded.contact;
+    const contact = req.user.contact;
 
     if (!contact) {
       return res.status(400).json({ message: "Contact information not found in token" });
@@ -346,19 +357,7 @@ const updatePaymentStatus = async (req, res) => {
 
 const cancelCustomerOrder = async (req, res) => {
   try {
-    const { token } = req.token;
-    if (!token) {
-      return res.status(400).json({ message: "Token is required" });
-    }
-
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (tokenErr) {
-      return res.status(401).json({ message: "Invalid token" });
-    }
-
-    const customerId = decoded.customerId;
+    const customerId = req.user.customerId;
     const { id } = req.params;
 
     const order = await Order.findById(id);

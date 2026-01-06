@@ -8,6 +8,7 @@ const router = express.Router();
 // Assuming only admin or authorized users should access these
 router.post("/create", authMiddleware, vendorController.createVendor);
 router.get("/dashboard", authMiddleware, vendorController.getVendorDashboard);
+router.get("/orders", authMiddleware, vendorController.getVendorOrders);
 router.get("/order/:id", authMiddleware, vendorController.getVendorOrderDetails);
 router.patch("/order/status", authMiddleware, vendorController.updateOrderStatus);
 router.patch("/status", authMiddleware, vendorController.toggleVendorStatus);
