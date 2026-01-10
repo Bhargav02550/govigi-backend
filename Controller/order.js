@@ -266,22 +266,8 @@ const getAllOrders = async (req, res) => {
 
 const getOrderById = async (req, res) => {
   try {
-    const { token } = req.token;
-
-    if (!token) {
-      return res.status(400).json({ message: "Token is required" });
-    }
-
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (tokenErr) {
-      console.error("JWT verification failed:", tokenErr.message);
-      return res.status(401).json({
-        message: "Invalid or expired token",
-        error: tokenErr.message
-      });
-    }
+    // Token is already verified by authMiddleware
+    // const customerId = req.user.customerId; // Available if needed for ownership check
 
     const { id } = req.params;
 
