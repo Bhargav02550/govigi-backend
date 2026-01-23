@@ -8,6 +8,7 @@ import Product from "../Models/product.js";
 import Customer from "../Models/Customer.js";
 import GlobalSettings from "../Models/GlobalSettings.js";
 import Wallet from "../Models/Wallet.js";
+import NotificationService from "../Services/NotificationService.js";
 
 const JWT_SECRET = process.env.SCERET_KEY;
 
@@ -194,10 +195,25 @@ const updateOrderStatus = async (req, res) => {
       id,
       { status },
       { new: true }
-    );
+    ).populate('customerId'); // Populate customer to access fcmToken
 
     if (!updatedOrder) {
       return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Send Push Notification
+    if (updatedOrder.customerId && updatedOrder.customerId.fcmToken) {
+      const fcmToken = updatedOrder.customerId.fcmToken;
+      const notificationTitle = `Order Status Updated`;
+      const notificationBody = `Your order #${updatedOrder.orderNumber} is now ${status}.`;
+
+      // Don't await this to avoid blocking the response
+      NotificationService.sendNotification(
+        fcmToken,
+        notificationTitle,
+        notificationBody,
+        { orderId: updatedOrder._id.toString(), type: 'order_update' }
+      ).catch(err => console.error("Failed to send status update notification:", err));
     }
 
     res

@@ -86,4 +86,17 @@ const getAllCustomersStatsController = async (req, res) => {
     }
 };
 
-export { createCustomerController, updateCustomerController, getCustomerByIdController, getAllCustomersController, getAllCustomersCountController, getAllCustomersStatsController, getCustomerProfileController };
+const updateDeviceTokenController = async (req, res) => {
+    try {
+        if (!req.user || !req.user.customerId) return res.status(401).json({ message: "No token provided" });
+        const { fcmToken } = req.body;
+        if (!fcmToken) return res.status(400).json({ message: "fcmToken is required" });
+
+        const updatedCustomer = await customerService.updateDeviceToken(req.user.customerId, fcmToken);
+        res.status(200).json({ message: "Device token updated successfully" });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+export { createCustomerController, updateCustomerController, getCustomerByIdController, getAllCustomersController, getAllCustomersCountController, getAllCustomersStatsController, getCustomerProfileController, updateDeviceTokenController };

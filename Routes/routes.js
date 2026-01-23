@@ -46,6 +46,7 @@ Router.get("/getCustomer/:id", controller_customer.getCustomerByIdController);
 Router.get("/getAllCustomers", controller_customer.getAllCustomersController);
 Router.get("/getAllCustomersCount", controller_customer.getAllCustomersCountController);
 Router.get("/customer/profile", authMiddleware, controller_customer.getCustomerProfileController);
+Router.patch("/customer/device-token", authMiddleware, controller_customer.updateDeviceTokenController);
 
 Router.get("/getAllCustomersStats", controller_customer.getAllCustomersStatsController);
 

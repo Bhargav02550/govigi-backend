@@ -49,7 +49,11 @@ const customerSchema = new mongoose.Schema({
             type: mongoose.Schema.Types.ObjectId,
             ref: 'orders'
         }
-    ]
+    ],
+    fcmToken: {
+        type: String,
+        required: false
+    }
 }, { timestamps: true });
 
 const Customer = mongoose.models.Customer || mongoose.model("Customer", customerSchema);

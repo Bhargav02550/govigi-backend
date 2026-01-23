@@ -1,6 +1,7 @@
 import Vendor from "../Models/Vendor.js";
 import Order from "../Models/orders.js";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 const JWT_SECRET = process.env.SCERET_KEY;
 
@@ -97,14 +98,26 @@ export const getVendorDashboard = async (req, res) => {
         if (!vendor) return res.status(404).json({ message: "Vendor not found" });
 
         // Fetch Orders assigned to this vendor
-        const orders = await Order.find({ vendorId: vendorId }).sort({ createdAt: -1 });
+        const orders = await Order.find({ vendorId: vendorId })
+            .sort({ createdAt: -1 })
+            .populate('customerId', 'customerName');
 
         // Calculate Stats
+        const totalOrders = orders.length;
+        const pendingOrders = orders.filter(o => o.sourcingStatus === 'Assigned' || o.sourcingStatus === 'Pending').length;
+        const completedOrders = orders.filter(o => o.sourcingStatus === 'Delivered').length;
+        const totalSales = orders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
+
+        const avgOrderValue = totalOrders > 0 ? (totalSales / totalOrders).toFixed(2) : "0.00";
+        const fulfillmentRate = totalOrders > 0 ? ((completedOrders / totalOrders) * 100).toFixed(1) : "0.0";
+
         const stats = {
-            totalOrders: orders.length,
-            pendingOrders: orders.filter(o => o.sourcingStatus === 'Assigned' || o.sourcingStatus === 'Pending').length,
-            completedOrders: orders.filter(o => o.sourcingStatus === 'Delivered').length,
-            revenue: orders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0) // Approximation
+            totalOrders,
+            pendingOrders,
+            completedOrders,
+            totalSales: totalSales.toFixed(2),
+            avgOrderValue,
+            fulfillmentRate
         };
 
         // Calculate Material Summary (Shopping List)
@@ -120,7 +133,7 @@ export const getVendorDashboard = async (req, res) => {
                             qty: (item.quantityKg || 0),
                             image: item.image,
                             unit: "kg",
-                            status: "Open", // Mock status for list
+                            status: "Low", // All pending materials are effectively "Low Stock" logic for now
                             createdAt: order.createdAt
                         };
                     }
@@ -138,12 +151,15 @@ export const getVendorDashboard = async (req, res) => {
             createdAt: materialSummary[key].createdAt
         }));
 
+        stats.lowStockItems = sourcingList.length;
+
         // Ensure orderId exists for frontend
         const safeOrders = orders.map(o => {
             const doc = o.toObject ? o.toObject() : o;
             return {
                 ...doc,
-                orderId: doc.orderId || doc.orderNumber || doc._id.toString()
+                orderId: doc.orderId || doc.orderNumber || doc._id.toString(),
+                customerName: doc.customerId?.customerName || "Unknown Customer"
             };
         });
 
@@ -179,16 +195,29 @@ export const updateOrderStatus = async (req, res) => {
 export const getVendorOrderDetails = async (req, res) => {
     try {
         const { id } = req.params;
-        const order = await Order.findById(id)
-            .populate('customerId', 'customerName customerPhone customerAddress')
-            .populate('addressId');
+        console.log("Fetching order details for ID:", id);
+
+        let order;
+
+        if (mongoose.Types.ObjectId.isValid(id)) {
+            order = await Order.findById(id)
+                .populate('customerId', 'customerName customerPhone customerAddress')
+                .populate('addressId');
+        } else {
+            console.log("Invalid ObjectId, trying lookup by orderNumber/orderId:", id);
+            order = await Order.findOne({ $or: [{ orderNumber: id }, { orderId: id }] })
+                .populate('customerId', 'customerName customerPhone customerAddress')
+                .populate('addressId');
+        }
 
         if (!order) {
-            return res.status(404).json({ message: "Order not found" });
+            console.log("Order not found in DB");
+            return res.status(404).json({ message: `Order not found with ID: ${id}` });
         }
         res.json(order);
     } catch (error) {
-        res.status(500).json({ message: "Error fetching order details" });
+        console.error("Error fetching order details:", error);
+        res.status(500).json({ message: "Error fetching order details", error: error.message });
     }
 };
 
@@ -215,7 +244,9 @@ export const getVendorOrders = async (req, res) => {
         const vendorId = req.user.vendorId;
         if (!vendorId) return res.status(401).json({ message: "Invalid Vendor Token" });
 
-        const orders = await Order.find({ vendorId: vendorId }).sort({ createdAt: -1 });
+        const orders = await Order.find({ vendorId: vendorId })
+            .sort({ createdAt: -1 })
+            .populate('customerId', 'customerName');
 
         const safeOrders = orders.map(o => {
             const doc = o.toObject ? o.toObject() : o;

@@ -82,6 +82,10 @@ class CustomerService extends BaseRepository {
         };
     }
 
+    async updateDeviceToken(id, token) {
+        return await Customer.findByIdAndUpdate(id, { fcmToken: token }, { new: true });
+    }
+
 }
 
 export default new CustomerService();
