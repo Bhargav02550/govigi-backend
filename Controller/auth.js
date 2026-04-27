@@ -1,40 +1,66 @@
-import User from "../Models/users.js";
+import Customer from "../Models/Customer.js";
+import Vendor from "../Models/Vendor.js";
 import jwt from "jsonwebtoken";
 import sendOtp from "./utils/sendOTP.js";
-import { authenticator } from "otplib";
+import Otp from "../Models/OtpSchema.js";
 import dotenv from 'dotenv';
+import crypto from 'crypto';
+import TempCustomer from "../Models/TempCustomer.js";
+import Address from "../Models/Address.js";
+import Admin from "../Models/admins.js";
 dotenv.config();
 
-const JWT_SECRET = process.env.SCERET_KEY;
+
 function generateOTP() {
-  return authenticator.generate(authenticator.generateSecret()).slice(0, 4);
+  return crypto.randomInt(1000, 9999).toString();
+}
+
+function hashOTP(otp) {
+  return crypto.createHash("sha256").update(otp).digest("hex");
 }
 
 const send_otp = async (req, res) => {
   try {
     const { contact } = req.body;
-    let user = await User.findOne({ contact });
 
-    if (!user) {
-      const newUser = new User({
-        contact,
-      });
-
-      await newUser.save();
-      user = newUser;
+    if (!contact) {
+      return res.status(400).json({ message: "Contact required" });
     }
 
-    const otp = generateOTP();
-    const send = await sendOtp(contact, otp);
+    let customer = await Customer.findOne({ customerPhone: contact });
+    let tempCustomer = null;
 
-    if (send) {
-      console.log("OTP : ", otp);
-      user.otp = otp;
-      user.otpExpires = Date.now() + 5 * 60 * 1000; // valid 5 min
-      await user.save();
-
-      res.json({ message: "OTP sent", userId: user._id });
+    if (!customer) {
+      tempCustomer = await TempCustomer.findOneAndUpdate(
+        { mobileNumber: contact },
+        { $setOnInsert: { mobileNumber: contact } },
+        { new: true, upsert: true }
+      );
     }
+
+    const isTestNumber = contact === '9999999999';
+    const otp = isTestNumber ? '1234' : generateOTP();
+    const hashed = hashOTP(otp);
+
+    await Otp.deleteMany({ mobileNumber: contact });
+
+    await Otp.create({
+      customerId: customer ? customer._id : null,
+      mobileNumber: contact,
+      otp: hashed
+    });
+
+    if (!isTestNumber) {
+      await sendOtp(contact, otp);
+    }
+    console.log("OTP:", otp);
+
+    res.json({
+      message: "OTP sent successfully",
+      isCustomer: !!customer,
+      userId: customer ? customer._id : tempCustomer._id
+    });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to send OTP" });
@@ -42,280 +68,292 @@ const send_otp = async (req, res) => {
 };
 
 const verify_otp = async (req, res) => {
-  const { contact, otp } = req.body;
-  const user = await User.findOne({ contact });
+  try {
+    const { contact, otp } = req.body;
 
-  if (!user) {
-    return res.status(404).json({ message: "User not found" });
+    if (!contact || !otp) {
+      return res.status(400).json({ message: "Contact and OTP required" });
+    }
+
+    const hashed = hashOTP(otp);
+
+    const otpRecord = await Otp.findOne({ mobileNumber: contact });
+
+    if (!otpRecord) {
+      return res.status(400).json({ message: "OTP expired or not found" });
+    }
+
+    if (otpRecord.otp !== hashed) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+    await Otp.deleteMany({ mobileNumber: contact });
+
+    const customer = await Customer.findOne({ customerPhone: contact });
+
+    if (customer) {
+      const token = jwt.sign(
+        {
+          customerId: customer._id,
+          contact: customer.customerPhone,
+          role: "customer",
+          customerStatus: customer.customerStatus
+        },
+        process.env.SCERET_KEY,
+        { expiresIn: "14d" }
+      );
+
+      return res.json({
+        message: "OTP verified",
+        token,
+        isCustomer: true,
+        isNew: false
+      });
+
+    }
+
+    let tempCustomer = await TempCustomer.findOneAndUpdate(
+      { mobileNumber: contact },
+      { $setOnInsert: { mobileNumber: contact } },
+      { new: true, upsert: true }
+    );
+
+    const token = jwt.sign(
+      {
+        tempCustomerId: tempCustomer._id,
+        contact: tempCustomer.mobileNumber,
+        role: "tempCustomer"
+      },
+      process.env.SCERET_KEY,
+      { expiresIn: "14d" }
+    );
+
+    return res.json({
+      message: "OTP verified",
+      token,
+      isCustomer: false,
+      needRegistration: true
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to verify OTP" });
   }
-
-  if (user.otp !== otp) {
-    return res.status(400).json({ message: "Invalid OTP" });
-  }
-
-  if (user.otpExpires < Date.now()) {
-    return res.status(400).json({ message: "OTP expired" });
-  }
-
-  user.otp = undefined;
-  user.otpExpires = undefined;
-  await user.save();
-
-  const token = jwt.sign(
-    { userId: user._id, contact: user.contact },
-    JWT_SECRET,
-    { expiresIn: "1d" }
-  );
-
-  if (user.firstName === undefined) {
-    return res.json({ message: "OTP verified", token, isNew: true });
-  }
-  res.json({ message: "OTP verified", token });
 };
 
 const completeProfile = async (req, res) => {
   try {
-    const { token, firstName, lastName, email } = req.body;
+    const {
+      token,
+      customerName,
+      customerEmail,
+      customerPhone,
+      customerContactPerson,
+      customerContactPersonNumber,
+      customerType,
+      businessImages,
+      address
+    } = req.body;
 
-    if (!token || !firstName || !lastName || !email) {
+    console.log(req.body);
+
+    if (
+      !token ||
+      !customerName ||
+      !customerPhone ||
+      !customerContactPerson ||
+      !customerType ||
+      !address
+    ) {
       return res.status(400).json({ message: "All fields are required." });
     }
-    // console.log("token",token)
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-    // console.log("decode",decoded)
-    const contact = decoded.contact;
-    // console.log("complete contact", contact);
+    const decoded = jwt.verify(token, process.env.SCERET_KEY);
 
-    const user = await User.findOneAndUpdate(
-      { contact },
-      { firstName, lastName, email },
-      { new: true }
-    );
+    console.log(decoded);
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
+    const tempCustomer = await TempCustomer.findById(decoded.tempCustomerId);
+
+    console.log(tempCustomer);
+
+    if (!tempCustomer) {
+      return res.status(404).json({ message: "Temporary user not found." });
     }
 
-    res.status(200).json({ message: "Profile completed successfully.", user });
-  } catch (err) {
-    console.error("JWT decode error:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to complete profile", error: err.message });
-  }
-};
+    const newAddress = await Address.create({
+      customerId: tempCustomer._id,
+      placeId: address.placeId,
+      formattedAddress: address.formattedAddress,
+      rawAddress: address.rawAddress,
+      components: address.components,
+      location: address.location,
+      label: address.label || "Business",
+      isPrimary: true
+    });
 
-const addAddress = async (req, res) => {
-  try {
-    const { token, address } = req.body;
-    if (!address) return res.json({ message: "address is a required field" });
+    const newCustomer = await Customer.create({
+      customerName,
+      customerEmail: customerEmail || undefined, // Fix: undefined allows sparse index to work
+      customerPhone,
+      customerContactPerson,
+      customerContactPersonNumber: customerContactPersonNumber || customerPhone,
+      customerType,
+      customerAddress: newAddress._id,
+      businessImages: businessImages || []
+    });
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const contact = decoded.contact;
-    const user = await User.findOne({ contact });
-    if (!user) return res.status(404).json({ message: "User not found." });
+    newAddress.customerId = newCustomer._id;
+    await newAddress.save();
 
-    address.name =
-      address.name || `${user.firstName || ""} ${user.lastName || ""}`.trim();
-    address.email = address.email || user.email;
-    address.contact = address.contact || user.contact;
+    await TempCustomer.findByIdAndDelete(tempCustomer._id);
 
-    const isDuplicate = user.addresses.some(
-      (addr) =>
-        addr.city === address.city &&
-        addr.pincode === address.pincode &&
-        addr.landmark === address.landmark
-    );
-
-    if (isDuplicate) {
-      return res.status(400).json({ message: "Address already exists." });
-    }
-
-    const updatedUser = await User.findOneAndUpdate(
-      { contact },
+    const finalToken = jwt.sign(
       {
-        $push: {
-          addresses: {
-            $each: [address],
-            $slice: -4,
-          },
-        },
+        customerId: newCustomer._id,
+        contact: newCustomer.customerPhone,
+        role: "customer",
+        customerStatus: newCustomer.customerStatus
       },
-      { new: true }
+      process.env.SCERET_KEY,
+      { expiresIn: "14d" }
     );
 
-    res
-      .status(200)
-      .json({ message: "Address added successfully.", user: updatedUser });
+    return res.status(200).json({
+      message: "Business profile completed successfully.",
+      customer: newCustomer,
+      address: newAddress,
+      token: finalToken
+    });
+
   } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Failed to add address", error: err.message });
-  }
-};
-
-const getAddress = async (req, res) => {
-  try {
-    const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({ message: "Token is required" });
-    }
-
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const contact = decoded.contact;
-
-    const user = await User.findOne({ contact });
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.status(200).json({ addresses: user.addresses || [] });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Failed to fetch addresses", error: err.message });
-  }
-};
-
-const editAddress = async (req, res) => {
-  try {
-    const { token, index, updatedAddress } = req.body;
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const contact = decoded.contact;
-
-    const user = await User.findOne({ contact });
-    if (!user || !user.addresses[index]) {
-      return res.status(404).json({ message: "Address not found" });
-    }
-
-    user.addresses[index] = {
-      ...user.addresses[index]._doc,
-      ...updatedAddress,
-    };
-    await user.save();
-
-    res
-      .status(200)
-      .json({ message: "Address updated", addresses: user.addresses });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Failed to update address", error: err.message });
-  }
-};
-
-const deleteAddress = async (req, res) => {
-  try {
-    const { token, index } = req.body;
-
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const contact = decoded.contact;
-
-    const user = await User.findOne({ contact });
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
-
-    if (!user.addresses[index]) {
-      return res
-        .status(404)
-        .json({ message: "Address not found at the given index." });
-    }
-
-    user.addresses.splice(index, 1);
-    await user.save();
-
-    res
-      .status(200)
-      .json({
-        message: "Address deleted successfully.",
-        addresses: user.addresses,
-      });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Failed to delete address", error: err.message });
-  }
-};
-
-const getWishlist = async (req, res) => {
-  try {
-    const { token, page, perPage } = req.body;
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const contact = decoded.contact;
-    const user = await User.findOne({ contact }).populate("wishlist");
-
-    if (!user) return res.status(404).json({ message: "User not found." });
-
-    let wishlist = user.wishlist || [];
-    if (page && perPage) {
-      const p = parseInt(page, 10) || 1;
-      const pp = parseInt(perPage, 10) || 10;
-      const start = (p - 1) * pp;
-      const end = start + pp;
-      const paginated = wishlist.slice(start, end);
-      return res.status(200).json({
-        wishlist: paginated,
-        total: wishlist.length,
-        page: p,
-        perPage: pp,
-        totalPages: Math.ceil(wishlist.length / pp)
+    console.error("Error in onboarding:", err);
+    if (err.code === 11000) {
+      return res.status(400).json({
+        message: "A customer with this email already exists.",
+        error: err.message
       });
     }
-
-    res.status(200).json({ wishlist });
-  } 
-  catch (err) {
-    res.status(500).json({ message: "Failed to fetch wishlist", error: err.message });
+    console.log(err);
+    return res.status(500).json({
+      message: "Failed to complete onboarding",
+      error: err.message
+    });
   }
 };
 
 
-const toggleWishlist = async (req, res) => {
+
+// --- Vendor Auth ---
+const send_vendor_otp = async (req, res) => {
   try {
-    const { token, productId } = req.body;
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const contact = decoded.contact;
+    const { contact } = req.body;
 
-    const user = await User.findOne({ contact });
-    if (!user) return res.status(404).json({ message: "User not found." });
-
-    const index = user.wishlist.indexOf(productId);
-
-    let status;
-    if (index === -1) {
-      user.wishlist.push(productId);
-      status = "added";
-    } else {
-      user.wishlist.pull(productId);
-      status = "removed";
+    if (!contact) {
+      return res.status(400).json({ message: "Contact required" });
     }
 
-    await user.save();
+    const isTestNumber = contact === '9999999999' || contact === '9133485888';
 
-    res.status(200).json({ status });
+    // Check if vendor exists
+    let vendor = await Vendor.findOne({ phone: contact });
+
+    if (!vendor) {
+      if (isTestNumber) {
+        // Auto-create test vendor if not exists
+        vendor = await Vendor.create({
+          businessName: "Test Vendor",
+          contactPerson: "Tester",
+          email: `test_${contact}@govigi.com`,
+          phone: contact,
+          address: {
+            formattedAddress: "Test Address, India",
+            components: { city: "Test City", country: "India" }
+          },
+          isActive: true
+        });
+        console.log("Created test vendor for:", contact);
+      } else {
+        return res.status(404).json({ message: "Vendor not found. Please contact admin." });
+      }
+    }
+
+    const otp = isTestNumber ? '1234' : generateOTP();
+    const hashed = hashOTP(otp);
+
+    await Otp.deleteMany({ mobileNumber: contact });
+
+    await Otp.create({
+      mobileNumber: contact,
+      otp: hashed,
+      role: 'vendor' // Optional: if you want to distinguish in OTP table
+    });
+
+    if (!isTestNumber) {
+      await sendOtp(contact, otp);
+    }
+    console.log("Vendor OTP:", otp);
+
+    res.json({
+      message: "OTP sent successfully",
+      isVendor: true
+    });
+
   } catch (err) {
-    res.status(500).json({ message: "Toggle failed", error: err.message });
+    console.error(err);
+    res.status(500).json({ message: "Failed to send OTP" });
   }
-}
+};
 
-export { 
-  send_otp , 
-  verify_otp , 
-  completeProfile , 
-  addAddress , 
-  getAddress , 
-  editAddress , 
-  deleteAddress ,
-  getWishlist,
-  toggleWishlist
+const verify_vendor_otp = async (req, res) => {
+  try {
+    const { contact, otp } = req.body;
+
+    if (!contact || !otp) {
+      return res.status(400).json({ message: "Contact and OTP required" });
+    }
+
+    const hashed = hashOTP(otp);
+
+    const otpRecord = await Otp.findOne({ mobileNumber: contact });
+
+    if (!otpRecord) {
+      return res.status(400).json({ message: "OTP expired or not found" });
+    }
+
+    if (otpRecord.otp !== hashed) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+    await Otp.deleteMany({ mobileNumber: contact });
+
+    const vendor = await Vendor.findOne({ phone: contact });
+
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor record not found" });
+    }
+
+    const token = jwt.sign(
+      {
+        vendorId: vendor._id,
+        contact: vendor.phone,
+        role: "vendor",
+        businessName: vendor.businessName
+      },
+      process.env.SCERET_KEY,
+      { expiresIn: "14d" }
+    );
+
+    return res.json({
+      message: "OTP verified",
+      token,
+      vendor
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to verify OTP" });
+  }
 };
 
 // --- Admin Login ---
-import Admin from "../Models/admins.js";
 
 const adminLogin = async (req, res) => {
   try {
@@ -339,8 +377,8 @@ const adminLogin = async (req, res) => {
     // Optionally, generate a JWT for admin session
     const token = jwt.sign(
       { adminId: admin._id, email: admin.email },
-      JWT_SECRET,
-      { expiresIn: "1d" }
+      process.env.SCERET_KEY,
+      { expiresIn: "14d" }
     );
     res.status(200).json({ message: "Login successful", token });
   } catch (err) {
@@ -348,4 +386,11 @@ const adminLogin = async (req, res) => {
   }
 };
 
-export { adminLogin };
+export {
+  send_otp,
+  verify_otp,
+  completeProfile,
+  send_vendor_otp,
+  verify_vendor_otp,
+  adminLogin
+};

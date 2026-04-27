@@ -18,7 +18,7 @@ const userSchema = new mongoose.Schema({
   addresses: [addressSchema],
   contact: { type: String, required: true, unique: true },
   otp: { type: String },
-  otpExpires: { type: Date},
+  otpExpires: { type: Date },
   wishlist: [
     {
       type: mongoose.Schema.Types.ObjectId,
