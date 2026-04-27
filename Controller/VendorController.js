@@ -58,6 +58,46 @@ export const getVendorById = async (req, res) => {
     }
 };
 
+
+// Refresh session checking if vendor exists for temp vendor's contact
+export const refreshSession = async (req, res) => {
+    try {
+        if (!req.user || !req.user.contact) {
+            return res.status(400).json({ message: "Invalid session or missing contact info." });
+        }
+
+        const vendor = await Vendor.findOne({ phone: req.user.contact });
+
+        if (!vendor) {
+            // Still no vendor found, registration is not complete
+            return res.status(404).json({ message: "Vendor not found. Please complete registration.", needRegistration: true });
+        }
+
+        // Vendor found! the mobile app is now verified.
+        const token = jwt.sign(
+            {
+                vendorId: vendor._id,
+                contact: vendor.phone,
+                role: "vendor",
+                businessName: vendor.businessName
+            },
+            process.env.SCERET_KEY,
+            { expiresIn: "14d" }
+        );
+
+        return res.status(200).json({
+            message: "Session refreshed successfully",
+            token,
+            isNew: false,
+            needRegistration: false,
+            isVerified: vendor.isVerified,
+            vendor: vendor
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Error refreshing session", error: error.message });
+    }
+};
+
 // Update vendor
 export const updateVendor = async (req, res) => {
     try {
@@ -163,11 +203,18 @@ export const getVendorDashboard = async (req, res) => {
             };
         });
 
-        res.json({
+        res.status(200).json({
             profile: {
                 businessName: vendor.businessName,
                 contactPerson: vendor.contactPerson,
-                image: vendor.businessImage
+                email: vendor.email,
+                phone: vendor.phone,
+                address: vendor.address?.formattedAddress || "No address provided",
+                image: vendor.businessImage,
+                isVerified: vendor.isVerified,
+                rating: vendor.rating || 4.5, // Dummy default if not set
+                joinedDate: vendor.joinedDate || vendor.createdAt || new Date(),
+                categories: vendor.supportedCategories?.length ? vendor.supportedCategories.join(", ") : "General Store"
             },
             stats,
             sourcingList,
@@ -223,7 +270,6 @@ export const getVendorOrderDetails = async (req, res) => {
 
 export const toggleVendorStatus = async (req, res) => {
     try {
-        // Middleware already verified token
         const vendorId = req.user.vendorId;
         if (!vendorId) return res.status(401).json({ message: "Invalid Vendor Token" });
 
@@ -246,7 +292,8 @@ export const getVendorOrders = async (req, res) => {
 
         const orders = await Order.find({ vendorId: vendorId })
             .sort({ createdAt: -1 })
-            .populate('customerId', 'customerName');
+            .populate('customerId', 'customerName')
+            .populate('addressId');
 
         const safeOrders = orders.map(o => {
             const doc = o.toObject ? o.toObject() : o;

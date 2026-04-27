@@ -4,6 +4,71 @@ import cloudinary from 'cloudinary';
 const { v2: cloudinaryV2 } = cloudinary;
 import productsService from '../Services/ProductsService.js';
 
+const STOCK_STATUSES = ['Available', 'Out of Stock'];
+
+const toNumber = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const numberValue = Number(value);
+  return Number.isNaN(numberValue) ? undefined : numberValue;
+};
+
+const toBoolean = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  return value === 'true' || value === '1';
+};
+
+const toTags = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (Array.isArray(value)) return value;
+  return String(value)
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+};
+
+const assignIfPresent = (target, key, value) => {
+  if (value !== undefined) target[key] = value;
+};
+
+const buildProductPayload = (body, { isCreate = false } = {}) => {
+  const payload = {};
+  const currentStock = toNumber(body.currentStock ?? body.stockQuantity);
+  const numericStock = toNumber(body.stock);
+
+  assignIfPresent(payload, 'name', body.name);
+  assignIfPresent(payload, 'sku', body.sku);
+  assignIfPresent(payload, 'category', body.category);
+  assignIfPresent(payload, 'subCategory', body.subCategory);
+  assignIfPresent(payload, 'description', body.description);
+  assignIfPresent(payload, 'unit', body.unit);
+  assignIfPresent(payload, 'pricePerKg', toNumber(body.pricePerKg));
+  assignIfPresent(payload, 'mrp', toNumber(body.mrp));
+  assignIfPresent(payload, 'costPrice', toNumber(body.costPrice));
+  assignIfPresent(payload, 'currentStock', currentStock ?? numericStock);
+  assignIfPresent(payload, 'minimumThreshold', toNumber(body.minimumThreshold ?? body.lowStockAlert));
+  assignIfPresent(payload, 'maxOrderQuantity', toNumber(body.maxOrderQuantity));
+  assignIfPresent(payload, 'trackStock', toBoolean(body.trackStock));
+  assignIfPresent(payload, 'vendor', body.vendor);
+  assignIfPresent(payload, 'productType', body.productType);
+  assignIfPresent(payload, 'seasonal', body.seasonal);
+  assignIfPresent(payload, 'countryOfOrigin', body.countryOfOrigin);
+  assignIfPresent(payload, 'shelfLife', toNumber(body.shelfLife));
+  assignIfPresent(payload, 'storageInstructions', body.storageInstructions);
+  assignIfPresent(payload, 'tags', toTags(body.tags));
+  assignIfPresent(payload, 'status', body.status);
+
+  if (STOCK_STATUSES.includes(body.stock)) {
+    payload.stock = body.stock;
+  } else if (payload.currentStock !== undefined) {
+    payload.stock = payload.currentStock > 0 ? 'Available' : 'Out of Stock';
+  } else if (isCreate) {
+    payload.stock = 'Available';
+  }
+
+  return payload;
+};
+
 const getAllProducts = async (req, res) => {
   try {
     const page = parseInt(req.query.page);
@@ -14,6 +79,7 @@ const getAllProducts = async (req, res) => {
 
     const category = req.query.category;
     const status = req.query.status;
+    const vendor = req.query.vendor;
     const search = req.query.search;
 
     let query = {};
@@ -24,8 +90,16 @@ const getAllProducts = async (req, res) => {
     if (status && status !== 'all') {
       query.status = status;
     }
+    if (vendor && vendor !== 'all') {
+      query.vendor = vendor;
+    }
     if (search) {
-      query.name = { $regex: search, $options: 'i' };
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } },
+        { vendor: { $regex: search, $options: 'i' } }
+      ];
     }
 
     total = await Product.countDocuments(query);
@@ -67,7 +141,6 @@ const getAllProducts = async (req, res) => {
 const createProduct = async (req, res) => {
   let image = null;
   try {
-    const { name, category, pricePerKg, stock, currentStock, minimumThreshold } = req.body;
     if (req.file) {
       image = await uploadImage(req.file);
       if (!image) {
@@ -76,13 +149,8 @@ const createProduct = async (req, res) => {
     }
 
     const product = new Product({
-      name,
-      category,
-      pricePerKg,
-      stock,
-      image,
-      currentStock,
-      minimumThreshold
+      ...buildProductPayload(req.body, { isCreate: true }),
+      image
     });
 
     const savedProduct = await product.save();
@@ -95,14 +163,9 @@ const createProduct = async (req, res) => {
 const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    const updates = {
-      name: req.body?.name,
-      category: req.body?.category,
-      pricePerKg: req.body?.pricePerKg,
-      stock: req.body?.stock,
-      currentStock: req.body?.currentStock,
-      minimumThreshold: req.body?.minimumThreshold
-    };
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    const updates = buildProductPayload(req.body);
 
     if (req.file) {
       if (product.image?.public_id) {
@@ -112,7 +175,6 @@ const updateProduct = async (req, res) => {
     }
 
     const updated = await Product.findByIdAndUpdate(req.params.id, updates, { new: true });
-    if (!updated) return res.status(404).json({ message: 'Product not found' });
     res.status(200).json(updated);
   } catch (err) {
     res.status(400).json({ message: 'Failed to update product', error: err });
@@ -182,6 +244,8 @@ const getCustomerProducts = async (req, res) => {
       image: { url: product.image?.url || null }, // Match frontend expected structure
       stock: product.stock,
       availableStock: product.availableStock,
+      currentStock: product.currentStock,
+      unit: product.unit,
       // Exclude internal fields like costPrice, vendorId etc if any
     }));
 
@@ -218,6 +282,8 @@ const bulkUpdateProducts = async (req, res) => {
     if (updates.stock !== undefined) allowedUpdates.stock = updates.stock; // Could be number or string depending on schema usage, primarily string enum 'Available'/'Out of Stock' or number for quantity? 
     // Schema says stock is String/Enum. currentStock is Number. 
     // Let's support both if needed, but primarily what the UI sends.
+    if (updates.currentStock !== undefined) allowedUpdates.currentStock = updates.currentStock;
+    if (updates.minimumThreshold !== undefined) allowedUpdates.minimumThreshold = updates.minimumThreshold;
     if (updates.category) allowedUpdates.category = updates.category;
     if (updates.pricePerKg) allowedUpdates.pricePerKg = updates.pricePerKg;
 

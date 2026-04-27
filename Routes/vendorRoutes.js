@@ -14,6 +14,7 @@ router.patch("/order/status", authMiddleware, vendorController.updateOrderStatus
 router.patch("/status", authMiddleware, vendorController.toggleVendorStatus);
 router.get("/getAll", authMiddleware, vendorController.getAllVendors);
 router.get("/get/:id", authMiddleware, vendorController.getVendorById);
+router.get("/refresh", authMiddleware, vendorController.refreshSession);
 router.patch("/update/:id", authMiddleware, vendorController.updateVendor);
 router.delete("/delete/:id", authMiddleware, vendorController.deleteVendor);
 

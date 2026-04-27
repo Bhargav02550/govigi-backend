@@ -16,6 +16,7 @@ import * as controlle_orders from "../Controller/OrdersController.js";
 import * as controller_address from "../Controller/AddressController.js";
 import * as controller_maps from "../Controller/GoogleMapsController.js";
 import * as controller_sourcing from "../Controller/SourcingController.js";
+import * as controller_onboarding from "../Controller/VendorOnboardingController.js";
 
 import upload from "../Controller/utils/upload.js";
 import * as controller_wallet from "../Controller/WalletController.js";
@@ -93,6 +94,7 @@ Router.delete("/deleteProduct/:id", controller_product.deleteProduct);
 //Categories
 Router.post("/createCategory", upload.single("image"), controller_category.createCategoryController);
 Router.put("/updateCategory/:id", upload.single("image"), controller_category.updateCategoryController);
+Router.delete("/deleteCategory/:id", controller_category.deleteCategoryController);
 Router.get("/getAllCategories", controller_category.getAllCategoriesController);
 Router.get("/getAllCategoriesStats", controller_category.getAllCategoriesStatsController);
 
@@ -137,6 +139,9 @@ Router.get("/settings/wallet", controller_settings.getWalletSettings);
 Router.get("/sourcing/vendors", controller_sourcing.getNearbyVendors);
 Router.post("/sourcing/assign", controller_sourcing.assignOrdersToVendor);
 
+// Vendor Onboarding
+Router.post("/onboardVendor", controller_onboarding.onboardVendor);
+
 // Vendor Routes
 Router.use("/vendors", vendorRoutes);
 
@@ -144,5 +149,8 @@ Router.use("/vendors", vendorRoutes);
 import * as controller_productRequest from "../Controller/ProductRequestController.js";
 Router.post("/createProductRequest", authMiddleware, controller_productRequest.createProductRequest);
 Router.get("/getAllProductRequests", authMiddleware, controller_productRequest.getProductRequests);
+
+// Testing / Simulation
+Router.post("/test/simulate-order", controller_order.simulateOrder);
 
 export default Router;

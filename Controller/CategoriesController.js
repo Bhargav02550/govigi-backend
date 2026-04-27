@@ -69,4 +69,18 @@ const updateCategoryController = async (req, res) => {
     }
 };
 
-export { createCategoryController, getAllCategoriesController, getAllCategoriesStatsController, updateCategoryController };
+const deleteCategoryController = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deletedCategory = await CategoryService.deleteCategory(id);
+        if (!deletedCategory) {
+            return res.status(404).json({ message: "Category not found" });
+        }
+        res.status(200).json({ message: "Category deleted successfully" });
+    } catch (error) {
+        console.error('Delete Category Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+export { createCategoryController, getAllCategoriesController, getAllCategoriesStatsController, updateCategoryController, deleteCategoryController };

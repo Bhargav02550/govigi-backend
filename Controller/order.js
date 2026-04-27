@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Order from "../Models/orders.js";
 import User from "../Models/users.js";
 import jwt from 'jsonwebtoken';
@@ -239,7 +240,8 @@ const getAllOrders = async (req, res) => {
       .sort({ createdAt: -1 });
 
     if (!orders || orders.length === 0) {
-      return res.status(404).json({ message: "No orders found" });
+      // Return empty array instead of 404 to avoid frontend errors
+      return res.status(200).json([]);
     }
 
     // Populate Categories for Sourcing UI
@@ -388,4 +390,121 @@ const cancelCustomerOrder = async (req, res) => {
   }
 };
 
-export { placeCustomerOrder, getCustomerOrders, updateOrderStatus, getAllOrders, getOrderById, getCustomerOrderCount, updatePaymentStatus, cancelCustomerOrder };
+const simulateOrder = async (req, res) => {
+  try {
+    const { vendorId, customerId: providedCustomerId, items: providedItems } = req.body;
+
+    let customerId = providedCustomerId;
+    let customer;
+
+    // 1. Find or Use a Default Customer
+    if (!customerId) {
+      customer = await Customer.findOne();
+      if (customer) {
+        customerId = customer._id;
+      } else {
+        // Create emergency test customer if table is empty
+        customer = await Customer.create({
+          customerName: "Simulation User",
+          customerPhone: "0000000000",
+          customerEmail: "sim@test.com",
+          customerContactPerson: "Sim Manager",
+          customerContactPersonNumber: "0000000000",
+          customerAddress: new mongoose.Types.ObjectId(), // Placeholder
+          customerType: new mongoose.Types.ObjectId(), // Placeholder
+        });
+        customerId = customer._id;
+      }
+    } else {
+      customer = await Customer.findById(customerId);
+    }
+
+    // 2. Prepare Items
+    const orderItems = [];
+    let totalAmount = 0;
+
+    if (providedItems && providedItems.length > 0) {
+      for (const item of providedItems) {
+        const product = await Product.findById(item.productId);
+        if (product) {
+          const qty = item.quantityKg || 1;
+          orderItems.push({
+            productId: product._id,
+            quantityKg: qty,
+            price: product.pricePerKg,
+            name: product.name,
+            image: product.image?.url || "https://res.cloudinary.com/demo/image/upload/sample.jpg",
+            category: product.category || "General"
+          });
+          totalAmount += (product.pricePerKg * qty);
+        }
+      }
+    }
+
+    // Fallback: If no items, find the first product
+    if (orderItems.length === 0) {
+      const fallbackProd = await Product.findOne();
+      if (fallbackProd) {
+        orderItems.push({
+          productId: fallbackProd._id,
+          quantityKg: 2,
+          price: fallbackProd.pricePerKg,
+          name: fallbackProd.name,
+          image: fallbackProd.image?.url || "https://res.cloudinary.com/demo/image/upload/sample.jpg",
+          category: fallbackProd.category || "General"
+        });
+        totalAmount += (fallbackProd.pricePerKg * 2);
+      } else {
+        // Absolute fallback for empty databases
+        orderItems.push({
+          productId: new mongoose.Types.ObjectId(),
+          quantityKg: 1,
+          price: 100,
+          name: "Test Simulation Product",
+          image: "https://res.cloudinary.com/demo/image/upload/sample.jpg",
+          category: "Test"
+        });
+        totalAmount += 100;
+      }
+    }
+
+    // 3. Generate Mock Order
+    const orderNumber = `SIM-${Date.now().toString().slice(-6)}`;
+    const newOrder = await Order.create({
+      customerId,
+      vendorId: vendorId || null,
+      orderNumber,
+      addressId: customer?.customerAddress || new mongoose.Types.ObjectId(),
+      items: orderItems,
+      scheduledDate: new Date(), // Today (bypasses "tomorrow" constraint)
+      scheduledTimeSlot: "SIMULATION",
+      name: customer?.customerName || "Sim User",
+      contact: customer?.customerPhone || "0000000000",
+      totalAmount,
+      status: "Pending",
+      paymentStatus: "Pending"
+    });
+
+    res.status(201).json({
+      message: "Simulation order placed successfully",
+      order: newOrder,
+      note: "This order bypassed all scheduling and auth constraints."
+    });
+
+  } catch (err) {
+    console.error("Simulate Order Error:", err);
+    res.status(500).json({ message: "Internal Server Error", error: err.message });
+  }
+};
+
+export {
+  placeCustomerOrder,
+  getCustomerOrders,
+  updateOrderStatus,
+  getAllOrders,
+  getOrderById,
+  getCustomerOrderCount,
+  updatePaymentStatus,
+  cancelCustomerOrder,
+  simulateOrder
+};

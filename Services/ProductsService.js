@@ -32,13 +32,36 @@ class ProductsService extends BaseRepository {
     async getAllProductsStats() {
         try {
             const totalProducts = await product.countDocuments();
-            const activeProducts = await product.countDocuments({ stock: { $gt: 0 } });
-            const inactiveProducts = await product.countDocuments({ stock: { $lte: 0 } });
+            const activeProducts = await product.countDocuments({ status: { $ne: 'inactive' } });
+            const inactiveProducts = await product.countDocuments({ status: 'inactive' });
+            const outOfStockProducts = await product.countDocuments({ stock: 'Out of Stock' });
+            const lowStockProducts = await product.countDocuments({
+                currentStock: { $gt: 0 },
+                $expr: { $lte: ['$currentStock', { $ifNull: ['$minimumThreshold', 10] }] }
+            });
+            const inventoryValue = await product.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalValue: {
+                            $sum: {
+                                $multiply: [
+                                    { $ifNull: ['$currentStock', 0] },
+                                    { $ifNull: ['$pricePerKg', 0] }
+                                ]
+                            }
+                        }
+                    }
+                }
+            ]);
 
             return {
                 totalProducts,
                 activeProducts,
-                inactiveProducts
+                inactiveProducts,
+                outOfStockProducts,
+                lowStockProducts,
+                totalValue: inventoryValue[0]?.totalValue || 0
             };
         } catch (err) {
             console.error("Error fetching product stats:", err);
